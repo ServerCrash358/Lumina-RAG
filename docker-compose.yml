@@ -1,0 +1,46 @@
+# docker-compose.yml — local dev stack for Lumina.
+#
+# Ports are offset from the other projects on this machine to avoid clashes:
+#   Postgres → 5435   Redis → 6380   API → 8001
+# Inside the compose network, services reach each other by name (db, redis).
+services:
+  api:
+    build: .
+    ports: ["8001:8000"]
+    environment:
+      DATABASE_URL: postgresql://lumina:lumina@db:5432/lumina
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: development
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  db:
+    image: pgvector/pgvector:pg17     # Postgres 17 with pgvector preinstalled
+    environment:
+      POSTGRES_USER: lumina
+      POSTGRES_PASSWORD: lumina
+      POSTGRES_DB: lumina
+    ports: ["5435:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs once on first init — creates the extension, table, and indexes.
+      - ./migrations/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lumina"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports: ["6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

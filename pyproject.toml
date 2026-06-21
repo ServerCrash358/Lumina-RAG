@@ -1,0 +1,42 @@
+[project]
+name = "lumina"
+version = "0.1.0"
+description = "Lumina — a production RAG API answering questions grounded in your documents"
+readme = "README.md"
+requires-python = ">=3.12"
+
+# Runtime deps. Some (openai, sentence-transformers) aren't used until Steps 2-4;
+# they're declared now so the environment is ready and imports stay lazy.
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "asyncpg>=0.30",
+    "pgvector>=0.3",          # registers the `vector` type with asyncpg (used in Step 3)
+    "pydantic>=2.9",
+    "pydantic-settings>=2.5",
+    "redis>=5.1",
+    "orjson>=3.10",
+    "prometheus-client>=0.21",
+    "sentence-transformers>=3.0",   # local embeddings + cross-encoder reranker
+    "openai>=1.40",                 # OpenAI-compatible client → talks to Ollama or any host
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.7",
+]
+
+[tool.uv]
+# Deployable app, not a library — don't try to build a wheel of it.
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
