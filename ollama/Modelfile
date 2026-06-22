@@ -1,0 +1,6 @@
+# Lumina's generation model: llama3.2:1b with a smaller context so it fits
+# entirely on a 4GB GPU (RTX 2050). The default 4096 ctx makes the KV cache
+# too large to offload fully. 2048 is plenty for RAG (top-5 chunks + question).
+FROM llama3.2:1b
+PARAMETER num_ctx 2048
+PARAMETER temperature 0.1

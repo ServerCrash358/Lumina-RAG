@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.config import get_settings
 from app.db import get_conn
+from app.metrics import RAG_CACHE_HITS, RAG_CACHE_MISSES, track_stage
 from app.schemas import QueryRequest, QueryResponse, Source
 from app.services.embedder import embed_query
 from app.services.generator import generate
@@ -49,14 +50,18 @@ async def query(
     if s.cache_enabled:
         try:
             if cached := await redis.get(key):
+                RAG_CACHE_HITS.inc()
                 payload = json.loads(cached)
                 return QueryResponse(**payload, cached=True)
         except Exception:
             pass  # cache is best-effort; never fail a query because Redis is down
+    RAG_CACHE_MISSES.inc()
 
     # 2. Retrieve (stage 1): embed query → ANN over HNSW → top-20 candidates.
-    query_vec = await asyncio.to_thread(embed_query, req.question)
-    rows = await retrieve(conn, query_vec, s.top_k_retrieve, s.hnsw_ef_search)
+    with track_stage("embed"):
+        query_vec = await asyncio.to_thread(embed_query, req.question)
+    with track_stage("retrieve"):
+        rows = await retrieve(conn, query_vec, s.top_k_retrieve, s.hnsw_ef_search)
     candidates = [
         {
             "content": r["content"],
@@ -69,10 +74,12 @@ async def query(
         return QueryResponse(question=req.question, answer="I don't know — no documents are indexed yet.", sources=[])
 
     # 3. Rerank (stage 2): cross-encoder picks the top-5 most relevant.
-    top = await asyncio.to_thread(rerank, req.question, candidates, s.top_k_rerank)
+    with track_stage("rerank"):
+        top = await asyncio.to_thread(rerank, req.question, candidates, s.top_k_rerank)
 
     # 4. Generate: LLM answers grounded ONLY in those top-5 chunks.
-    answer = await generate(req.question, [c["content"] for c in top])
+    with track_stage("generate"):
+        answer = await generate(req.question, [c["content"] for c in top])
 
     sources = [
         Source(content=c["content"], metadata=c["metadata"], score=round(c["rerank_score"], 4))

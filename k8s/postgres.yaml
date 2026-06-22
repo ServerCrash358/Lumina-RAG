@@ -1,0 +1,80 @@
+# Postgres (pgvector) in-cluster: init SQL via ConfigMap, data on a PVC.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: lumina
+data:
+  001_init.sql: |
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE TABLE IF NOT EXISTS documents (
+        id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        content    TEXT        NOT NULL,
+        metadata   JSONB       NOT NULL DEFAULT '{}'::jsonb,
+        embedding  vector(384),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_documents_embedding_hnsw
+        ON documents USING hnsw (embedding vector_cosine_ops)
+        WITH (m = 16, ef_construction = 64);
+    CREATE INDEX IF NOT EXISTS idx_documents_metadata
+        ON documents USING gin (metadata);
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: lumina
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: lumina
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  strategy:
+    type: Recreate          # a single PVC can't be shared during a rolling update
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg17
+          env:
+            - { name: POSTGRES_USER, value: lumina }
+            - { name: POSTGRES_PASSWORD, value: lumina }
+            - { name: POSTGRES_DB, value: lumina }
+            # data subdir so the PVC mount root (with lost+found) doesn't upset initdb
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports: [{ containerPort: 5432 }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "lumina"] }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: postgres-data } }
+        - { name: init, configMap: { name: postgres-init } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: lumina
+spec:
+  selector: { app: postgres }
+  ports: [{ port: 5432, targetPort: 5432 }]

@@ -12,11 +12,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 import redis.asyncio as aredis
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.responses import ORJSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.config import get_settings
 from app.db import create_pool
+from app.metrics import PrometheusMiddleware
 from app.routers import health, ingest, query, search
 
 
@@ -42,6 +44,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(PrometheusMiddleware)
+
 app.include_router(health.router)
 app.include_router(ingest.router)
 app.include_router(search.router)
@@ -51,3 +55,9 @@ app.include_router(query.router)
 @app.get("/")
 async def root() -> dict[str, str]:
     return {"name": "lumina", "status": "ok", "docs": "/docs"}
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    # Prometheus scrape target: exposes all registered metrics in text format.
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)

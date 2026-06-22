@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     # ── generation (Step 4) — OpenAI-compatible, defaults to local Ollama ─
     llm_base_url: str = "http://localhost:11434/v1"   # Ollama's OpenAI-compatible API
     llm_api_key: str | None = None                    # ignored by Ollama; set for cloud
-    llm_model: str = "llama3.2:3b"
+    llm_model: str = "lumina-llm"   # custom Ollama model: llama3.2:1b @ num_ctx 2048 (fits 4GB GPU)
     llm_temperature: float = 0.1                       # low → faithful, less invention
     llm_max_tokens: int = 512
     cache_enabled: bool = True                         # Redis answer cache

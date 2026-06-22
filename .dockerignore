@@ -1,0 +1,11 @@
+# Keep the build context small + don't leak local state into the image.
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.git/
+.env
+ollama/
+*.md
+.dockerignore

@@ -6,9 +6,9 @@ async FastAPI, PostgreSQL + **pgvector** (HNSW ANN), Redis cache, two-stage
 retrieval (vector search → cross-encoder rerank), containerised, deployed to
 Kubernetes via GitOps, and fully observable.
 
-> **Status: Steps 1–3 of 9 complete** — app skeleton, pgvector data layer,
-> local-embedding ingestion (`POST /ingest`), and vector retrieval (`POST /search`,
-> HNSW ANN) are live. See the build plan below.
+> **Status: Steps 1–6 + 7a complete** — full RAG pipeline runs locally, free,
+> instrumented, containerised, and **deployed live to a Kubernetes (kind)
+> cluster** (Postgres+Redis in-cluster, LLM on host GPU). CI/CD + ArgoCD next.
 
 ## Architecture (target)
 
@@ -36,10 +36,10 @@ genuinely relevant chunks before the LLM ever sees them.
 | 1 | App skeleton + pgvector data layer (`documents` + HNSW) | ✅ done |
 | 2 | Ingestion: chunk → embed (local bge-small) → store. `POST /ingest` | ✅ done |
 | 3 | Retrieval: pgvector ANN (HNSW, cosine) → top-20. `POST /search` | ✅ done |
-| 4 | Rerank + generate: cross-encoder → top-5 → LLM + cache. `POST /query` | ⬜ |
-| 5 | Instrument: `/metrics`, OpenTelemetry traces, logs | ⬜ |
-| 6 | Containerise (done early here) + harden | ◑ |
-| 7 | Kubernetes + CI/CD + ArgoCD GitOps | ⬜ |
+| 4 | Rerank + generate: cross-encoder → top-5 → local LLM + cache. `POST /query` | ✅ done |
+| 5 | Instrument: `/metrics` (HTTP + per-stage + cache). OTel traces later | ✅ done |
+| 6 | Containerise full app (CPU torch, HF cache vol, host Ollama) | ✅ done |
+| 7 | Kubernetes (kind) ✅ live · CI/CD + ArgoCD GitOps ⬜ | ◑ |
 | 8 | Eval + automate: MLflow + RAGAS + Prefect daily pipeline | ⬜ |
 | 9 | Cloud (Terraform/AWS) + k6 load test + collect metrics | ⬜ |
 

@@ -6,11 +6,25 @@
 services:
   api:
     build: .
-    ports: ["8001:8000"]
+    ports: ["8000:8000"]
     environment:
       DATABASE_URL: postgresql://lumina:lumina@db:5432/lumina
       REDIS_URL: redis://redis:6379/0
       APP_ENV: development
+      # The embedder + reranker run INSIDE this Linux container on CPU (Windows
+      # Docker can't pass the GPU through easily). They're small, so that's fine.
+      EMBED_DEVICE: cpu
+      # The LLM stays on the HOST via Ollama (uses your GPU). From inside the
+      # container, the host is reachable as host.docker.internal — NOT localhost.
+      LLM_BASE_URL: http://host.docker.internal:11434/v1
+      LLM_MODEL: lumina-llm
+      # Persist downloaded HF models (embedder ~130MB + reranker ~80MB) in a
+      # volume so they're not re-downloaded on every container restart.
+      HF_HOME: /home/appuser/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # makes the host reachable on Linux too
+    volumes:
+      - hf_cache:/home/appuser/.cache/huggingface
     depends_on:
       db: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -44,3 +58,4 @@ services:
 
 volumes:
   pgdata:
+  hf_cache:

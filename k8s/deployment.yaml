@@ -1,0 +1,47 @@
+# The Lumina API Deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lumina-api
+  namespace: lumina
+  labels: { app: lumina-api }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: lumina-api }
+  template:
+    metadata:
+      labels: { app: lumina-api }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: api
+          image: lumina-api:latest
+          # The image was `kind load`-ed locally — never try to pull from a registry.
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8000 }]
+          envFrom:
+            - configMapRef: { name: lumina-config }
+            - secretRef: { name: lumina-secret }
+          # Liveness must NOT hit the DB (a DB blip shouldn't restart the app).
+          livenessProbe:
+            httpGet: { path: /health/live, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # Readiness checks the DB → pod leaves the LB rotation if DB is down.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: { cpu: 200m, memory: 512Mi }
+            limits: { cpu: "1", memory: 2Gi }   # torch embedder+reranker need headroom
+          volumeMounts:
+            - { name: hf-cache, mountPath: /home/appuser/.cache/huggingface }
+      volumes:
+        # Per-pod model cache. (emptyDir is wiped on reschedule — fine for a demo;
+        # a PVC would persist the ~210MB of model downloads across restarts.)
+        - { name: hf-cache, emptyDir: {} }

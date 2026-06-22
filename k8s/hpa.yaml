@@ -1,0 +1,21 @@
+# Horizontal Pod Autoscaler — scales the API on CPU.
+# min 1 to stay light on a laptop; bump minReplicas for real availability.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: lumina-api
+  namespace: lumina
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: lumina-api
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

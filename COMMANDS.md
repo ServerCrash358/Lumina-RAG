@@ -113,5 +113,120 @@ docker exec lumina-db-1 psql -U lumina -d lumina -c \
 `<=>` = cosine distance; score = `1 - distance` (1.0 = identical). `hnsw.ef_search`
 (config: HNSW_EF_SEARCH=64) tunes recall vs speed at query time.
 
+## Step 4 — rerank + generate (local LLM via Ollama)
+
+```bash
+# 1. Start Ollama (native install → uses the GPU) and pull a small model.
+ollama serve            # (background; or the Ollama tray app)
+ollama pull llama3.2:1b # ~1.3GB, fits a 4GB GPU
+
+# 2. Bake a fitted context size into a custom model so it offloads fully to GPU.
+#    The default num_ctx=4096 makes the KV cache too big for a 4GB card.
+#    (Modelfile lives in ollama/Modelfile: FROM llama3.2:1b / PARAMETER num_ctx 2048)
+ollama create lumina-llm -f ollama/Modelfile
+
+# 3. Point Lumina at it (.env): LLM_MODEL=lumina-llm  (LLM_BASE_URL stays Ollama's)
+#    Restart the API, then:
+curl -X POST localhost:8010/query -H 'content-type: application/json' \
+  -d '{"question":"How does Lumina keep search fast, and why rerank?"}'
+#   -> {question, answer, sources:[{content,metadata,score}], cached:false}
+#   Same question again -> cached:true, ~0.3s instead of ~35s.
+
+# Confirm the model is on the GPU, not CPU:
+ollama ps          # PROCESSOR should read '100% GPU'
+nvidia-smi         # ~1.7GB VRAM used
+```
+
+### If the model won't load ("CPU/CUDA_Host buffer" / "paging file too small")
+That's a RAM/commit-limit problem, not code. Free physical RAM (close VS Code /
+browser) so there's > ~6GB free, and keep num_ctx small. Check with:
+```powershell
+(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB   # GB free
+```
+
+## Step 5 — instrumentation (Prometheus metrics)
+
+Port is back to 8000 (yesterday's orphaned socket cleared). Start services:
+```bash
+docker compose up -d db redis
+ollama serve
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+```bash
+# Drive some traffic, then scrape metrics:
+curl -X POST localhost:8000/query -H 'content-type: application/json' -d '{"question":"..."}'
+curl localhost:8000/metrics
+
+# The useful series:
+#   http_request_duration_seconds_*  → p50/p95/p99 latency, by route
+#   http_requests_total{status=~"5.."} → error rate
+#   rag_cache_hits_total / rag_cache_misses_total → cache hit rate
+#   rag_stage_seconds{stage="embed|retrieve|rerank|generate"} → where time goes
+```
+
+Measured steady-state per-stage (2nd call, models warm):
+  embed ~32ms · retrieve ~4ms · rerank ~181ms · generate ~2.1s
+(First call's rerank shows ~9.5s — that's the one-time cross-encoder model load.)
+
+## Step 6 — containerise the full app
+
+The whole app (FastAPI + embedder + reranker) now runs in Docker; the LLM stays
+on the host via Ollama, reached at `host.docker.internal:11434`.
+
+```bash
+# Stop any host uvicorn on 8000 first, then:
+docker compose up -d --build      # api + db + redis, all containerised
+curl localhost:8000/health/ready
+curl -X POST localhost:8000/query -H 'content-type: application/json' -d '{"question":"..."}'
+```
+
+Key points baked in:
+- **CPU-only torch** in the image (`--index-url .../whl/cpu`) → image is **1.6GB**,
+  not 8GB (the default Linux torch bundles ~6GB of unused CUDA libs).
+- **HF model cache volume** (`hf_cache`) persists the embedder+reranker (~217MB)
+  so restarts don't re-download.
+- **`EMBED_DEVICE=cpu`** in-container; generation delegated to host GPU Ollama via
+  **`LLM_BASE_URL=http://host.docker.internal:11434/v1`** + `extra_hosts: host-gateway`.
+
+```bash
+docker compose down      # stop everything (keeps pgdata + hf_cache volumes)
+```
+
+## Step 7a — live Kubernetes deploy (kind)
+
+```bash
+# Install kind (single binary), create a cgroup-v1-compatible cluster (k8s 1.30).
+curl -sL -o ~/bin/kind.exe https://github.com/kubernetes-sigs/kind/releases/latest/download/kind-windows-amd64
+kind create cluster --name lumina --image kindest/node:v1.30.4
+
+# Build + load the app image INTO the cluster (no registry needed locally).
+docker compose build api
+kind load docker-image lumina-api:latest --name lumina
+
+# Ollama must listen beyond localhost so pods can reach it:
+#   (Windows)  set OLLAMA_HOST=0.0.0.0:11434  before `ollama serve`
+# Pods reach it at http://host.docker.internal:11434 (works on Docker Desktop).
+
+# Apply everything + wait.
+kubectl apply -k k8s/
+kubectl -n lumina rollout status deploy/lumina-api
+
+# Test via port-forward.
+kubectl -n lumina port-forward svc/lumina-api 8088:80
+curl -X POST localhost:8088/query -H 'content-type: application/json' -d '{"question":"..."}'
+```
+
+Gotchas hit + fixed:
+- **kind 0.32 (k8s 1.34) hard-fails on cgroup v1** (this WSL/Docker setup) →
+  used `--image kindest/node:v1.30.4`.
+- **`imagePullPolicy: IfNotPresent`** is required — the image is `kind load`-ed,
+  not in a registry.
+- The api pod restarts a few times at first (fail-fast DB pool racing Postgres
+  startup); it self-heals once Postgres is Ready. (An initContainer that waits
+  for Postgres would make this clean.)
+
+Cluster teardown: `kind delete cluster --name lumina`
+
 ---
-*Log: Steps 1–3 done. Next: Step 4 (cross-encoder rerank + LLM generate → /query).*
+*Log: Steps 1–6 + 7a (live k8s) done. Next: 7b — CI/CD (GitHub Actions) + ArgoCD GitOps.*
