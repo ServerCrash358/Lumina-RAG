@@ -20,7 +20,7 @@ spec:
       containers:
         - name: api
           # GHCR image; CI rewrites this tag to the commit SHA on each push.
-          image: ghcr.io/servercrash358/lumina-api:9d5133ed0d6fa9c9d0e73ef63fa1336abc11fcbb
+          image: ghcr.io/servercrash358/lumina-api:eda7cbe636c0f551ce48f247b3fe488618e0ac2c
           # IfNotPresent so a locally `kind load`-ed image with this tag is used
           # without hitting the registry (local dev); real clusters pull from GHCR.
           imagePullPolicy: IfNotPresent
