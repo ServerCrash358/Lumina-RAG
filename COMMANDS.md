@@ -228,5 +228,66 @@ Gotchas hit + fixed:
 
 Cluster teardown: `kind delete cluster --name lumina`
 
+## Step 7b — CI/CD (GitHub Actions) + ArgoCD GitOps
+
+Artifacts (run on GitHub / in-cluster, not your laptop):
+- `.github/workflows/ci-cd.yaml` — push to main → test (ruff + pytest) → build →
+  push image to **GHCR** → rewrite the image tag in `k8s/deployment.yaml` + commit.
+- `argocd/application.yaml` — ArgoCD watches `k8s/` on main and auto-syncs.
+
+```bash
+# Local validation (no Docker needed):
+uv run --with pytest pytest tests/ -q          # 5 passed
+
+# CI runs automatically on push. Image lands at:
+#   ghcr.io/servercrash358/lumina-api:<sha>
+
+# Bring ArgoCD live in the kind cluster (one-time bootstrap):
+kubectl create namespace argocd
+kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+kubectl -n argocd rollout status deploy/argocd-server
+kubectl apply -f argocd/application.yaml         # ArgoCD now reconciles k8s/ from git
+```
+
+Notes when going live:
+- **GHCR images are private by default.** For the cluster to pull, either make the
+  package public (GitHub → Packages → lumina-api → Public) or add an imagePullSecret.
+- For **local kind**, keep using the locally-built image:
+  `docker build -t ghcr.io/servercrash358/lumina-api:latest . && kind load docker-image ghcr.io/servercrash358/lumina-api:latest`
+  (imagePullPolicy IfNotPresent uses the loaded image, no pull needed).
+
+## Step 8 — eval + automation (metrics + MLflow + Prefect)
+
+```bash
+uv pip install -e ".[eval]"        # httpx + mlflow + prefect (host-only)
+
+# With the API up (local or k8s), run the eval — it ingests a golden corpus,
+# then measures retrieval recall@k / MRR and answer keyword-coverage + latency.
+python evals/run_eval.py --base-url http://localhost:8000
+mlflow ui                           # view logged runs at localhost:5000 (./mlruns)
+
+# Automate it (ingest -> eval -> quality gate), once or on a daily cron:
+python pipelines/eval_pipeline.py            # run once
+python pipelines/eval_pipeline.py --serve    # schedule (cron 0 2 * * *)
+```
+Free + deterministic: metrics use the system's own outputs (no paid LLM judge).
+RAGAS' faithfulness/answer-relevancy can be added by pointing it at Ollama.
+
+## Step 9 — cloud infrastructure (Terraform / AWS)
+
+```bash
+cd terraform
+terraform fmt -check && terraform init -backend=false && terraform validate
+
+# To actually provision (needs AWS creds; costs money — not run here):
+export TF_VAR_db_password=...        # or TF_VAR_db_password in env
+terraform init && terraform apply
+aws eks update-kubeconfig --name lumina --region ap-south-1
+# Then deploy the SAME k8s/ manifests, or let ArgoCD sync them.
+```
+Provisions: VPC + EKS + RDS Postgres (pgvector) + ElastiCache Redis + ECR.
+On AWS there's no host GPU → switch generation to Amazon Bedrock / a cloud LLM
+(one config line — the generator is OpenAI-compatible).
+
 ---
-*Log: Steps 1–6 + 7a (live k8s) done. Next: 7b — CI/CD (GitHub Actions) + ArgoCD GitOps.*
+*Log: ALL 9 STEPS DONE. Lumina is a complete, locally-runnable, cloud-ready RAG system.*

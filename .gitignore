@@ -10,6 +10,15 @@ venv/
 # Env / secrets
 .env
 
+# Terraform
+terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+
+# Eval artifacts
+mlruns/
+
 # OS
 .DS_Store
 Thumbs.db

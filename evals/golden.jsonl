@@ -1,0 +1,5 @@
+{"question": "How does Lumina keep vector search fast as the corpus grows to millions of documents?", "expected_source": "hnsw", "expected_keywords": ["HNSW", "approximate", "nearest"]}
+{"question": "Why does Lumina use a cross-encoder, and how many candidates does it rerank?", "expected_source": "rerank", "expected_keywords": ["cross-encoder", "rerank", "relevance"]}
+{"question": "What happens when the same question is asked twice?", "expected_source": "cache", "expected_keywords": ["cache", "Redis", "second"]}
+{"question": "What embedding model does Lumina use and how many dimensions does it produce?", "expected_source": "embeddings", "expected_keywords": ["bge", "384"]}
+{"question": "Where does answer generation run, and how would you switch to a cloud LLM?", "expected_source": "generation", "expected_keywords": ["Ollama", "OpenAI", "configuration"]}

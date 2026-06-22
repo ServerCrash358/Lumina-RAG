@@ -19,8 +19,10 @@ spec:
     spec:
       containers:
         - name: api
-          image: lumina-api:latest
-          # The image was `kind load`-ed locally — never try to pull from a registry.
+          # GHCR image; CI rewrites this tag to the commit SHA on each push.
+          image: ghcr.io/servercrash358/lumina-api:latest
+          # IfNotPresent so a locally `kind load`-ed image with this tag is used
+          # without hitting the registry (local dev); real clusters pull from GHCR.
           imagePullPolicy: IfNotPresent
           ports: [{ containerPort: 8000 }]
           envFrom:

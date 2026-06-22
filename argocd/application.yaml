@@ -1,0 +1,36 @@
+# ArgoCD Application — the GitOps definition.
+#
+# ArgoCD continuously reconciles the cluster to match the k8s/ directory on
+# main. CI pushes a commit that bumps the image tag; ArgoCD notices and rolls
+# the Deployment forward. Nobody runs `kubectl apply` by hand.
+#
+# Bootstrap once (see COMMANDS.md):
+#   kubectl create namespace argocd
+#   kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+#   kubectl apply -f argocd/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lumina
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/ServerCrash358/Lumina-RAG.git
+    targetRevision: main
+    path: k8s            # the directory ArgoCD watches (kustomize-aware)
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: lumina
+  syncPolicy:
+    automated:
+      prune: true        # delete resources removed from git
+      selfHeal: true     # revert manual drift back to git state
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m

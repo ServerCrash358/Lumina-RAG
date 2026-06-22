@@ -1,0 +1,74 @@
+name: CI/CD
+
+# Test on every push/PR; build + push + GitOps-bump only on main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: lumina-api
+
+jobs:
+  # ── JOB 1: test ──────────────────────────────────────────────────────────
+  # Lightweight: installs only pytest + ruff (NOT torch), so it runs in seconds.
+  # The chunker tests are pure-python and import no heavy deps.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Install test tooling
+        run: |
+          uv venv
+          uv pip install pytest pytest-asyncio ruff
+      - name: Lint
+        run: uv run ruff check app
+      - name: Unit tests
+        run: uv run pytest tests/ -v
+
+  # ── JOB 2: build & push image, then bump the manifest (GitOps) ───────────
+  build-and-push:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # to commit the image-tag bump
+      packages: write     # to push to GHCR
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve image reference (lowercase owner — GHCR requires it)
+        run: echo "IMAGE=${REGISTRY}/${OWNER,,}/${IMAGE_NAME}" >> "$GITHUB_ENV"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}   # auto-provided; no secret to set up
+
+      - name: Build & push (SHA-tagged, immutable)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # GitOps handoff: rewrite the image tag in the manifest and commit it.
+      # ArgoCD (watching this repo) then reconciles the cluster. No kubectl in CI.
+      - name: Bump image tag in manifest
+        run: |
+          sed -i "s|image: .*/${IMAGE_NAME}:.*|image: ${IMAGE}:${{ github.sha }}|" k8s/deployment.yaml
+          git config user.email "ci@github.com"
+          git config user.name "GitHub Actions"
+          git commit -am "ci: deploy ${{ github.sha }}"
+          git push
